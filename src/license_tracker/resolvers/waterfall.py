@@ -199,9 +199,10 @@ class WaterfallResolver(WaterfallResolverBase):
     async def close(self) -> None:
         """Close any open resources (like HTTP sessions).
 
-        Should be called when done using the resolver, especially if using
-        the GitHub resolver which maintains an aiohttp session.
+        Should be called when done using the resolver. Closes both
+        the PyPI and GitHub resolvers which maintain aiohttp sessions.
         """
+        await self.pypi_resolver.close()
         await self.github_resolver.close()
 
     async def __aenter__(self) -> "WaterfallResolver":
