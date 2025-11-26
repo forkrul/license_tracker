@@ -143,10 +143,10 @@ async def _run_gen(
             )
         except ValueError as e:
             err_console.print(f"[red]Error:[/red] {e}")
-            return 1
+            return 2
         except Exception as e:
             err_console.print(f"[red]Error scanning {scan}:[/red] {e}")
-            return 1
+            return 2
 
         progress.update(task, completed=True)
 
@@ -187,7 +187,7 @@ async def _run_gen(
         console.print(f"[green]Generated:[/green] {output}")
     except Exception as e:
         err_console.print(f"[red]Error writing output:[/red] {e}")
-        return 1
+        return 2
 
     return 0
 
@@ -326,7 +326,8 @@ def check(
 
     Exit codes:
         0 - All licenses compliant
-        1 - Violations found or error occurred
+        1 - Violations found
+        2 - Error occurred (invalid arguments, scan failure, etc.)
     """
     _setup_logging(verbose)
 
@@ -334,13 +335,13 @@ def check(
         err_console.print(
             "[red]Error:[/red] Must specify either --forbidden or --allowed"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     if forbidden and allowed:
         err_console.print(
             "[red]Error:[/red] Cannot specify both --forbidden and --allowed"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     # Parse license lists
     forbidden_set = set(forbidden.split(",")) if forbidden else set()
@@ -359,7 +360,7 @@ def check(
         packages, results = asyncio.run(run_check())
     except Exception as e:
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     if not packages:
         console.print("[green]No packages to check[/green]")
@@ -436,7 +437,7 @@ def cache(
     else:
         err_console.print(f"[red]Unknown action:[/red] {action}")
         err_console.print("Valid actions: show, clear")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":
