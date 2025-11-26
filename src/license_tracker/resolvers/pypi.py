@@ -31,44 +31,7 @@ class PyPIResolver(BaseResolver):
     The resolver returns LicenseLink objects with SPDX-normalized
     identifiers and URLs pointing to the SPDX license pages
     (is_verified_file=False).
-
-    This resolver manages an aiohttp session for efficient connection
-    reuse across multiple resolve calls. Use as an async context manager
-    or call close() when done.
     """
-
-    def __init__(self) -> None:
-        """Initialize the PyPI resolver."""
-        self._session: Optional[aiohttp.ClientSession] = None
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session.
-
-        Returns:
-            The shared aiohttp ClientSession.
-        """
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10)
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """Close the aiohttp session.
-
-        Should be called when done using the resolver to release resources.
-        """
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-            self._session = None
-
-    async def __aenter__(self) -> "PyPIResolver":
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
-        await self.close()
 
     @property
     def name(self) -> str:
@@ -107,33 +70,33 @@ class PyPIResolver(BaseResolver):
         logger.debug("Fetching PyPI metadata from %s", url)
 
         try:
-            session = await self._get_session()
-            async with session.get(url) as response:
-                if response.status == 404:
-                    logger.warning(
-                        "Package %s %s not found on PyPI", spec.name, spec.version
-                    )
-                    return None
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 404:
+                        logger.warning(
+                            "Package %s %s not found on PyPI", spec.name, spec.version
+                        )
+                        return None
 
-                if response.status != 200:
-                    logger.error(
-                        "PyPI API returned status %d for %s %s",
-                        response.status,
-                        spec.name,
-                        spec.version,
-                    )
-                    return None
+                    if response.status != 200:
+                        logger.error(
+                            "PyPI API returned status %d for %s %s",
+                            response.status,
+                            spec.name,
+                            spec.version,
+                        )
+                        return None
 
-                try:
-                    data = await response.json()
-                except Exception as e:
-                    logger.error(
-                        "Failed to parse JSON response for %s %s: %s",
-                        spec.name,
-                        spec.version,
-                        e,
-                    )
-                    return None
+                    try:
+                        data = await response.json()
+                    except Exception as e:
+                        logger.error(
+                            "Failed to parse JSON response for %s %s: %s",
+                            spec.name,
+                            spec.version,
+                            e,
+                        )
+                        return None
 
         except aiohttp.ClientError as e:
             logger.error(

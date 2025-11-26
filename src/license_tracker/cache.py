@@ -6,7 +6,6 @@ resolving license information for the same package versions.
 
 import json
 import sqlite3
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -139,8 +138,16 @@ class LicenseCache:
         resolved_at = datetime.now(UTC)
         expires_at = resolved_at + timedelta(days=self.ttl_days)
 
-        # Serialize license data to JSON using dataclasses.asdict
-        license_dicts = [asdict(lic) for lic in licenses]
+        # Serialize license data to JSON
+        license_dicts = [
+            {
+                "spdx_id": lic.spdx_id,
+                "name": lic.name,
+                "url": lic.url,
+                "is_verified_file": lic.is_verified_file,
+            }
+            for lic in licenses
+        ]
         license_data_json = json.dumps(license_dicts)
 
         conn = sqlite3.connect(self.db_path)

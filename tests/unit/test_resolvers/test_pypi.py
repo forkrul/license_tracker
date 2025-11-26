@@ -1,6 +1,6 @@
 """Unit tests for PyPI resolver."""
 
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import pytest
 from aiohttp import ClientError, ClientResponseError
@@ -11,11 +11,9 @@ from license_tracker.resolvers.pypi import PyPIResolver
 
 
 @pytest.fixture
-async def pypi_resolver() -> AsyncGenerator[PyPIResolver, None]:
+def pypi_resolver() -> PyPIResolver:
     """Return a PyPIResolver instance for testing."""
-    resolver = PyPIResolver()
-    yield resolver
-    await resolver.close()
+    return PyPIResolver()
 
 
 @pytest.fixture
@@ -271,14 +269,12 @@ async def test_resolve_bsd_license_from_classifier(
         assert "BSD" in metadata.licenses[0].spdx_id or "BSD" in metadata.licenses[0].name
 
 
-def test_resolver_name() -> None:
+def test_resolver_name(pypi_resolver: PyPIResolver) -> None:
     """Test that resolver has correct name."""
-    resolver = PyPIResolver()
-    assert resolver.name == "PyPI"
+    assert pypi_resolver.name == "PyPI"
 
 
-def test_resolver_priority() -> None:
+def test_resolver_priority(pypi_resolver: PyPIResolver) -> None:
     """Test that resolver has correct priority."""
     # PyPI should be high priority (low number)
-    resolver = PyPIResolver()
-    assert resolver.priority == 10
+    assert pypi_resolver.priority == 10

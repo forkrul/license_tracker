@@ -14,7 +14,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from license_tracker.cache import LicenseCache
-from license_tracker.models import PackageMetadata, PackageSpec
 from license_tracker.reporters import MarkdownReporter
 from license_tracker.resolvers import WaterfallResolver
 from license_tracker.scanners import get_scanner
@@ -42,79 +41,6 @@ def _setup_logging(verbose: bool) -> None:
     logging.getLogger("license_tracker").setLevel(level)
 
 
-async def _scan_and_resolve(
-    scan: Path,
-    github_token: Optional[str],
-    verbose: bool,
-    use_cache: bool = True,
-) -> tuple[list[PackageSpec], dict[PackageSpec, Optional[PackageMetadata]]]:
-    """Scan lock file and resolve license metadata for all packages.
-
-    This is shared logic used by both the gen and check commands.
-
-    Args:
-        scan: Path to the lock file.
-        github_token: Optional GitHub API token.
-        verbose: Whether to print verbose output.
-        use_cache: Whether to use the license cache.
-
-    Returns:
-        Tuple of (list of package specs, dict of resolved metadata).
-
-    Raises:
-        ValueError: If scanner cannot be determined for the file.
-        Exception: If scanning fails.
-    """
-    # Scan for packages
-    scanner = get_scanner(scan)
-    if verbose:
-        console.print(f"[dim]Using scanner: {scanner.source_name}[/dim]")
-
-    packages = scanner.scan()
-
-    if not packages:
-        return packages, {}
-
-    # Check cache first
-    cache = LicenseCache() if use_cache else None
-    cached_count = 0
-    to_resolve = []
-    cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
-
-    for spec in packages:
-        if cache:
-            cached = cache.get(spec.name, spec.version)
-            if cached:
-                cached_count += 1
-                cached_metadata[spec] = PackageMetadata(
-                    name=spec.name,
-                    version=spec.version,
-                    licenses=cached,
-                )
-                continue
-        to_resolve.append(spec)
-
-    if cached_count > 0 and verbose:
-        console.print(f"[dim]Using {cached_count} cached entries[/dim]")
-
-    # Resolve uncached packages
-    resolved_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
-    if to_resolve:
-        async with WaterfallResolver(github_token=github_token) as resolver:
-            results = await resolver.resolve_batch(to_resolve)
-
-        for spec, metadata in results.items():
-            resolved_metadata[spec] = metadata
-            # Cache the result
-            if cache and metadata and metadata.licenses:
-                cache.set(spec.name, spec.version, metadata.licenses)
-
-    # Combine results
-    all_metadata = {**cached_metadata, **resolved_metadata}
-
-    return packages, all_metadata
-
-
 async def _run_gen(
     scan: Path,
     output: Path,
@@ -126,35 +52,80 @@ async def _run_gen(
     """Async implementation of the gen command."""
     _setup_logging(verbose)
 
+    # Step 1: Scan for packages
+    try:
+        scanner = get_scanner(scan)
+        if verbose:
+            console.print(f"[dim]Using scanner: {scanner.source_name}[/dim]")
+    except ValueError as e:
+        err_console.print(f"[red]Error:[/red] {e}")
+        return 1
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("Scanning and resolving licenses...", total=None)
-
+        # Scan packages
+        task = progress.add_task("Scanning dependencies...", total=None)
         try:
-            packages, all_metadata = await _scan_and_resolve(
-                scan=scan,
-                github_token=github_token,
-                verbose=verbose,
-                use_cache=True,
-            )
-        except ValueError as e:
-            err_console.print(f"[red]Error:[/red] {e}")
-            return 2
+            packages = scanner.scan()
         except Exception as e:
             err_console.print(f"[red]Error scanning {scan}:[/red] {e}")
-            return 2
-
+            return 1
         progress.update(task, completed=True)
 
-    if not packages:
-        console.print("[yellow]No packages found in lock file[/yellow]")
-        return 0
+        if not packages:
+            console.print("[yellow]No packages found in lock file[/yellow]")
+            return 0
 
-    console.print(f"Found [bold]{len(packages)}[/bold] packages")
+        console.print(f"Found [bold]{len(packages)}[/bold] packages")
+
+        # Step 2: Resolve licenses
+        progress.update(task, description="Resolving licenses...")
+
+        # Check cache first
+        cache = LicenseCache()
+        cached_count = 0
+        to_resolve = []
+        cached_metadata = {}
+
+        for spec in packages:
+            cached = cache.get(spec.name, spec.version)
+            if cached:
+                cached_count += 1
+                # Create metadata from cache
+                from license_tracker.models import PackageMetadata
+
+                cached_metadata[spec] = PackageMetadata(
+                    name=spec.name,
+                    version=spec.version,
+                    licenses=cached,
+                )
+            else:
+                to_resolve.append(spec)
+
+        if cached_count > 0 and verbose:
+            console.print(f"[dim]Using {cached_count} cached entries[/dim]")
+
+        # Resolve uncached packages
+        resolved_metadata = {}
+        if to_resolve:
+            async with WaterfallResolver(github_token=github_token) as resolver:
+                results = await resolver.resolve_batch(to_resolve)
+
+            for spec, metadata in results.items():
+                if metadata:
+                    resolved_metadata[spec] = metadata
+                    # Cache the result
+                    if metadata.licenses:
+                        cache.set(spec.name, spec.version, metadata.licenses)
+
+        # Combine results
+        all_metadata = {**cached_metadata, **resolved_metadata}
+
+        progress.update(task, completed=True)
 
     # Count results
     resolved_count = sum(1 for m in all_metadata.values() if m and m.licenses)
@@ -187,7 +158,7 @@ async def _run_gen(
         console.print(f"[green]Generated:[/green] {output}")
     except Exception as e:
         err_console.print(f"[red]Error writing output:[/red] {e}")
-        return 2
+        return 1
 
     return 0
 
@@ -326,8 +297,7 @@ def check(
 
     Exit codes:
         0 - All licenses compliant
-        1 - Violations found
-        2 - Error occurred (invalid arguments, scan failure, etc.)
+        1 - Violations found or error occurred
     """
     _setup_logging(verbose)
 
@@ -335,38 +305,38 @@ def check(
         err_console.print(
             "[red]Error:[/red] Must specify either --forbidden or --allowed"
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     if forbidden and allowed:
         err_console.print(
             "[red]Error:[/red] Cannot specify both --forbidden and --allowed"
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     # Parse license lists
     forbidden_set = set(forbidden.split(",")) if forbidden else set()
     allowed_set = set(allowed.split(",")) if allowed else set()
 
-    # Scan and resolve using shared logic
-    async def run_check():
-        return await _scan_and_resolve(
-            scan=scan,
-            github_token=github_token,
-            verbose=verbose,
-            use_cache=True,
-        )
-
+    # Scan and resolve
     try:
-        packages, results = asyncio.run(run_check())
+        scanner = get_scanner(scan)
+        packages = scanner.scan()
     except Exception as e:
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     if not packages:
         console.print("[green]No packages to check[/green]")
         raise typer.Exit(code=0)
 
     console.print(f"Checking [bold]{len(packages)}[/bold] packages...")
+
+    # Resolve licenses
+    async def resolve_all():
+        async with WaterfallResolver(github_token=github_token) as resolver:
+            return await resolver.resolve_batch(packages)
+
+    results = asyncio.run(resolve_all())
 
     # Check compliance
     violations = []
@@ -437,7 +407,7 @@ def cache(
     else:
         err_console.print(f"[red]Unknown action:[/red] {action}")
         err_console.print("Valid actions: show, clear")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
