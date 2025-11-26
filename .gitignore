@@ -219,6 +219,7 @@ celerybeat-schedule
 
 # Poetry
 poetry.lock
+!tests/fixtures/poetry.lock
 
 # Node.js (if using any frontend tools)
 node_modules/

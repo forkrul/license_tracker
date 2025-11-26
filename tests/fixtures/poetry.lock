@@ -1,0 +1,38 @@
+[[package]]
+name = "requests"
+version = "2.31.0"
+description = "Python HTTP for Humans."
+
+[[package]]
+name = "click"
+version = "8.1.7"
+description = "Composable command line interface toolkit"
+
+[[package]]
+name = "aiohttp"
+version = "3.9.0"
+description = "Async http client/server framework (asyncio)"
+
+[[package]]
+name = "certifi"
+version = "2024.2.2"
+description = "Python package for providing Mozilla's CA Bundle."
+
+[[package]]
+name = "charset-normalizer"
+version = "3.3.2"
+description = "The Real First Universal Charset Detector"
+
+[[package]]
+name = "idna"
+version = "3.6"
+description = "Internationalized Domain Names in Applications (IDNA)"
+
+[[package]]
+name = "urllib3"
+version = "2.1.0"
+description = "HTTP library with thread-safe connection pooling"
+
+[metadata]
+lock-version = "2.0"
+python-versions = ">=3.11"
