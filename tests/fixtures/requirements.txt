@@ -1,0 +1,18 @@
+# Production dependencies
+requests==2.31.0
+click==8.1.7
+aiohttp>=3.9.0
+jinja2~=3.1.0
+
+# Comments should be ignored
+# So should blank lines
+
+certifi>=2024.0.0  # inline comment
+
+# Git URLs should be skipped with warning
+# git+https://github.com/psf/requests.git@main
+
+# These are various version specifier formats
+urllib3>=1.21.1,<3
+idna>=2.5,<4
+charset-normalizer>=2,<4
