@@ -17,20 +17,15 @@ class PipenvScanner(BaseScanner):
     Parses Pipfile.lock JSON format to extract package names and versions
     from both the "default" and "develop" sections.
 
-    Example Pipfile.lock structure:
+    Example Pipfile.lock structure::
+
         {
             "_meta": {...},
             "default": {
-                "requests": {
-                    "version": "==2.31.0",
-                    ...
-                }
+                "requests": {"version": "==2.31.0", ...}
             },
             "develop": {
-                "pytest": {
-                    "version": "==8.0.0",
-                    ...
-                }
+                "pytest": {"version": "==8.0.0", ...}
             }
         }
     """
