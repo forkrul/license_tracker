@@ -36,7 +36,7 @@ class MarkdownReporter(BaseReporter):
             # Load custom template from file
             env = Environment(
                 loader=FileSystemLoader(template_path.parent),
-                autoescape=False,
+                autoescape=True,
             )
             self.template = env.get_template(template_path.name)
         else:
@@ -54,7 +54,7 @@ class MarkdownReporter(BaseReporter):
             .joinpath("licenses.md.j2")
             .read_text(encoding="utf-8")
         )
-        env = Environment(autoescape=False)
+        env = Environment(autoescape=True)
         return env.from_string(template_content)
 
     def render(
