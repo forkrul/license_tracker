@@ -303,63 +303,6 @@ class TestCacheInitialization:
 
         conn.close()
 
-    def test_purge_expired_on_init(self, temp_cache_dir, sample_licenses):
-        """Test that expired entries are purged on cache initialization."""
-        import sqlite3
-
-        db_path = temp_cache_dir / "purge_test.db"
-        cache = LicenseCache(db_path=db_path)
-
-        # Manually insert fresh and expired entries
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Expired entry (31 days old)
-        expired_resolved_at = datetime.now(UTC) - timedelta(days=31)
-        expired_expires_at = expired_resolved_at + timedelta(days=30)
-        cursor.execute(
-            """
-            INSERT INTO license_cache (package_name, package_version, license_data, resolved_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                "expired-pkg",
-                "1.0.0",
-                "[]",
-                expired_resolved_at.isoformat(),
-                expired_expires_at.isoformat(),
-            ),
-        )
-
-        # Fresh entry
-        fresh_resolved_at = datetime.now(UTC)
-        fresh_expires_at = fresh_resolved_at + timedelta(days=30)
-        cursor.execute(
-            """
-            INSERT INTO license_cache (package_name, package_version, license_data, resolved_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                "fresh-pkg",
-                "1.0.0",
-                "[]",
-                fresh_resolved_at.isoformat(),
-                fresh_expires_at.isoformat(),
-            ),
-        )
-
-        conn.commit()
-        conn.close()
-
-        # Re-initialize cache to trigger purge
-        reinitialized_cache = LicenseCache(db_path=db_path)
-        info = reinitialized_cache.info()
-
-        # Verify that only the fresh entry remains
-        assert info["count"] == 1
-        assert reinitialized_cache.get("fresh-pkg", "1.0.0") is not None
-        assert reinitialized_cache.get("expired-pkg", "1.0.0") is None
-
     def test_index_on_expires_at(self, cache):
         """Test that index on expires_at is created."""
         import sqlite3

@@ -78,23 +78,6 @@ class LicenseCache:
         conn.commit()
         conn.close()
 
-        # Purge expired entries on initialization
-        self._purge_expired()
-
-    def _purge_expired(self) -> None:
-        """Remove all expired entries from the cache."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        now_utc_iso = datetime.now(UTC).isoformat()
-
-        cursor.execute(
-            "DELETE FROM license_cache WHERE expires_at < ?", (now_utc_iso,)
-        )
-
-        conn.commit()
-        conn.close()
-
     def get(self, name: str, version: str) -> Optional[list[LicenseLink]]:
         """Retrieve cached license data for a package.
 

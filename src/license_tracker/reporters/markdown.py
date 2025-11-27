@@ -9,7 +9,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Optional
 
-from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
+from jinja2 import Environment, FileSystemLoader, Template
 
 from license_tracker.models import PackageMetadata
 from license_tracker.reporters.base import BaseReporter
@@ -36,7 +36,7 @@ class MarkdownReporter(BaseReporter):
             # Load custom template from file
             env = Environment(
                 loader=FileSystemLoader(template_path.parent),
-                autoescape=select_autoescape(),
+                autoescape=True,
             )
             self.template = env.get_template(template_path.name)
         else:
@@ -54,7 +54,7 @@ class MarkdownReporter(BaseReporter):
             .joinpath("licenses.md.j2")
             .read_text(encoding="utf-8")
         )
-        env = Environment(autoescape=select_autoescape())
+        env = Environment(autoescape=True)
         return env.from_string(template_content)
 
     def render(

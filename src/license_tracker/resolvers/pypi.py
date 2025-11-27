@@ -12,7 +12,7 @@ import aiohttp
 from license_expression import get_spdx_licensing
 
 from license_tracker.models import LicenseLink, PackageMetadata, PackageSpec
-from license_tracker.resolvers.http import HttpResolver
+from license_tracker.resolvers.base import BaseResolver
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 SPDX = get_spdx_licensing()
 
 
-class PyPIResolver(HttpResolver):
+class PyPIResolver(BaseResolver):
     """Resolver for fetching license metadata from PyPI.
 
     Fetches package information from the PyPI JSON API and extracts
@@ -37,13 +37,38 @@ class PyPIResolver(HttpResolver):
     or call close() when done.
     """
 
-    def _create_session(self) -> aiohttp.ClientSession:
-        """Create a new aiohttp.ClientSession with a timeout.
+    def __init__(self) -> None:
+        """Initialize the PyPI resolver."""
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create the aiohttp session.
 
         Returns:
-            A new aiohttp.ClientSession instance with a 10-second timeout.
+            The shared aiohttp ClientSession.
         """
-        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+        return self._session
+
+    async def close(self) -> None:
+        """Close the aiohttp session.
+
+        Should be called when done using the resolver to release resources.
+        """
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+    async def __aenter__(self) -> "PyPIResolver":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        await self.close()
 
     @property
     def name(self) -> str:
@@ -331,12 +356,7 @@ class PyPIResolver(HttpResolver):
                         url=f"https://spdx.org/licenses/{spdx_id}.html",
                         is_verified_file=False,
                     )
-            except Exception as e:
-                logger.debug(
-                    "SPDX parsing failed for '%s', falling back: %s",
-                    license_text,
-                    e,
-                )
+            except Exception:
                 # If parsing fails, try simple text matching
                 pass
 
