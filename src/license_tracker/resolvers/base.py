@@ -50,6 +50,27 @@ class BaseResolver(ABC):
         """
         return 100
 
+    async def enrich(
+        self, spec: PackageSpec, metadata: PackageMetadata
+    ) -> Optional[PackageMetadata]:
+        """Enrich existing metadata with additional information.
+
+        This optional method allows resolvers to add information to
+        metadata that was already resolved by another resolver.
+        For example, GitHubResolver can enrich PyPI metadata with
+        a verified license file URL.
+
+        The default implementation returns the metadata unchanged.
+
+        Args:
+            spec: Package specification being resolved.
+            metadata: Existing metadata to enrich.
+
+        Returns:
+            Enriched PackageMetadata, or None if enrichment failed.
+        """
+        return metadata
+
 
 class WaterfallResolverBase(ABC):
     """Abstract base for waterfall resolution strategy.
