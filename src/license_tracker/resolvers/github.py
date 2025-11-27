@@ -11,10 +11,10 @@ from urllib.parse import urlparse
 import aiohttp
 
 from license_tracker.models import LicenseLink, PackageMetadata, PackageSpec
-from license_tracker.resolvers.base import BaseResolver
+from license_tracker.resolvers.http import HttpResolver
 
 
-class GitHubResolver(BaseResolver):
+class GitHubResolver(HttpResolver):
     """Resolver that fetches license information from GitHub's API.
 
     Uses GitHub's license API endpoint to get direct links to LICENSE files
@@ -32,8 +32,8 @@ class GitHubResolver(BaseResolver):
             github_token: Optional GitHub personal access token for API authentication.
                 Increases rate limit from 60 to 5000 requests/hour.
         """
+        super().__init__()
         self.github_token = github_token
-        self._session: Optional[aiohttp.ClientSession] = None
 
     @property
     def name(self) -> str:
@@ -52,21 +52,6 @@ class GitHubResolver(BaseResolver):
             80 (higher priority than generic SPDX, lower than PyPI)
         """
         return 80
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session.
-
-        Returns:
-            Shared aiohttp ClientSession instance.
-        """
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-
-    async def close(self) -> None:
-        """Close the aiohttp session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
 
     def _parse_github_url(self, url: str) -> Optional[tuple[str, str]]:
         """Parse GitHub URL to extract owner and repository name.

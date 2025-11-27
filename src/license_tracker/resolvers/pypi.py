@@ -12,7 +12,7 @@ import aiohttp
 from license_expression import get_spdx_licensing
 
 from license_tracker.models import LicenseLink, PackageMetadata, PackageSpec
-from license_tracker.resolvers.base import BaseResolver
+from license_tracker.resolvers.http import HttpResolver
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 SPDX = get_spdx_licensing()
 
 
-class PyPIResolver(BaseResolver):
+class PyPIResolver(HttpResolver):
     """Resolver for fetching license metadata from PyPI.
 
     Fetches package information from the PyPI JSON API and extracts
@@ -37,38 +37,13 @@ class PyPIResolver(BaseResolver):
     or call close() when done.
     """
 
-    def __init__(self) -> None:
-        """Initialize the PyPI resolver."""
-        self._session: Optional[aiohttp.ClientSession] = None
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create the aiohttp session.
+    def _create_session(self) -> aiohttp.ClientSession:
+        """Create a new aiohttp.ClientSession with a timeout.
 
         Returns:
-            The shared aiohttp ClientSession.
+            A new aiohttp.ClientSession instance with a 10-second timeout.
         """
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10)
-            )
-        return self._session
-
-    async def close(self) -> None:
-        """Close the aiohttp session.
-
-        Should be called when done using the resolver to release resources.
-        """
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-            self._session = None
-
-    async def __aenter__(self) -> "PyPIResolver":
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
-        await self.close()
+        return aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
 
     @property
     def name(self) -> str:
