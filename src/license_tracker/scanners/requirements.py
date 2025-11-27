@@ -43,8 +43,8 @@ class RequirementsScanner(BaseScanner):
     def can_handle(cls, path: Path) -> bool:
         """Check if this scanner can handle the given file.
 
-        Handles files with names matching requirements*.txt or *-requirements.txt
-        or *_requirements.txt patterns.
+        Handles files with names matching ``requirements*.txt`` or
+        ``*-requirements.txt`` or ``*_requirements.txt`` patterns.
 
         Args:
             path: Path to check.
