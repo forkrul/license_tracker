@@ -356,7 +356,12 @@ class PyPIResolver(BaseResolver):
                         url=f"https://spdx.org/licenses/{spdx_id}.html",
                         is_verified_file=False,
                     )
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    "SPDX parsing failed for '%s', falling back: %s",
+                    license_text,
+                    e,
+                )
                 # If parsing fails, try simple text matching
                 pass
 
