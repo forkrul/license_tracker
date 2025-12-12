@@ -1,5 +1,10 @@
 # License Tracker
 
+<div align="center">
+  <img src="docs/images/logo-concept-a.png" alt="Logo Concept A" width="400">
+  <img src="docs/images/logo-concept-b.png" alt="Logo Concept B" width="400">
+</div>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-150%20passing-brightgreen.svg)]()
