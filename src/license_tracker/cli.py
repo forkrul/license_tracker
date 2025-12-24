@@ -76,23 +76,33 @@ async def _scan_and_resolve(
         return packages, {}
 
     # Check cache first
-    cache = LicenseCache() if use_cache else None
     cached_count = 0
     to_resolve = []
     cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
 
-    for spec in packages:
-        if cache:
-            cached = cache.get(spec.name, spec.version)
-            if cached:
-                cached_count += 1
-                cached_metadata[spec] = PackageMetadata(
-                    name=spec.name,
-                    version=spec.version,
-                    licenses=cached,
-                )
-                continue
-        to_resolve.append(spec)
+    # Use context manager if cache is enabled
+    cache_ctx = LicenseCache() if use_cache else None
+
+    # We need to manually handle the context manager here because it's conditional
+    # and spans multiple logical blocks (check first, then update later)
+    # Ideally, we would wrap the whole block, but we can just use it as a regular object
+    # if we enter/exit it manually, or better yet, just use a with block if use_cache is True.
+
+    if use_cache:
+        with LicenseCache() as cache:
+            for spec in packages:
+                cached = cache.get(spec.name, spec.version)
+                if cached:
+                    cached_count += 1
+                    cached_metadata[spec] = PackageMetadata(
+                        name=spec.name,
+                        version=spec.version,
+                        licenses=cached,
+                    )
+                    continue
+                to_resolve.append(spec)
+    else:
+        to_resolve = list(packages)
 
     if cached_count > 0 and verbose:
         console.print(f"[dim]Using {cached_count} cached entries[/dim]")
@@ -103,11 +113,16 @@ async def _scan_and_resolve(
         async with WaterfallResolver(github_token=github_token) as resolver:
             results = await resolver.resolve_batch(to_resolve)
 
-        for spec, metadata in results.items():
-            resolved_metadata[spec] = metadata
-            # Cache the result
-            if cache and metadata and metadata.licenses:
-                cache.set(spec.name, spec.version, metadata.licenses)
+        # Cache results if enabled
+        if use_cache:
+            with LicenseCache() as cache:
+                for spec, metadata in results.items():
+                    resolved_metadata[spec] = metadata
+                    if metadata and metadata.licenses:
+                        cache.set(spec.name, spec.version, metadata.licenses)
+        else:
+             for spec, metadata in results.items():
+                resolved_metadata[spec] = metadata
 
     # Combine results
     all_metadata = {**cached_metadata, **resolved_metadata}
