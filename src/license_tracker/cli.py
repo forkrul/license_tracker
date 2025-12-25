@@ -5,6 +5,7 @@ attribution documentation and checking compliance.
 """
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import Annotated, Optional
@@ -76,38 +77,46 @@ async def _scan_and_resolve(
         return packages, {}
 
     # Check cache first
-    cache = LicenseCache() if use_cache else None
-    cached_count = 0
-    to_resolve = []
-    cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
+    cache_manager = LicenseCache() if use_cache else None
 
-    for spec in packages:
-        if cache:
-            cached = cache.get(spec.name, spec.version)
-            if cached:
-                cached_count += 1
-                cached_metadata[spec] = PackageMetadata(
-                    name=spec.name,
-                    version=spec.version,
-                    licenses=cached,
-                )
-                continue
-        to_resolve.append(spec)
+    # Use context manager if cache is enabled, otherwise use a dummy context
+    if cache_manager:
+        cm = cache_manager
+    else:
+        cm = contextlib.nullcontext()
 
-    if cached_count > 0 and verbose:
-        console.print(f"[dim]Using {cached_count} cached entries[/dim]")
+    with cm as cache:
+        cached_count = 0
+        to_resolve = []
+        cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
 
-    # Resolve uncached packages
-    resolved_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
-    if to_resolve:
-        async with WaterfallResolver(github_token=github_token) as resolver:
-            results = await resolver.resolve_batch(to_resolve)
+        for spec in packages:
+            if cache:
+                cached = cache.get(spec.name, spec.version)
+                if cached:
+                    cached_count += 1
+                    cached_metadata[spec] = PackageMetadata(
+                        name=spec.name,
+                        version=spec.version,
+                        licenses=cached,
+                    )
+                    continue
+            to_resolve.append(spec)
 
-        for spec, metadata in results.items():
-            resolved_metadata[spec] = metadata
-            # Cache the result
-            if cache and metadata and metadata.licenses:
-                cache.set(spec.name, spec.version, metadata.licenses)
+        if cached_count > 0 and verbose:
+            console.print(f"[dim]Using {cached_count} cached entries[/dim]")
+
+        # Resolve uncached packages
+        resolved_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
+        if to_resolve:
+            async with WaterfallResolver(github_token=github_token) as resolver:
+                results = await resolver.resolve_batch(to_resolve)
+
+            for spec, metadata in results.items():
+                resolved_metadata[spec] = metadata
+                # Cache the result
+                if cache and metadata and metadata.licenses:
+                    cache.set(spec.name, spec.version, metadata.licenses)
 
     # Combine results
     all_metadata = {**cached_metadata, **resolved_metadata}
