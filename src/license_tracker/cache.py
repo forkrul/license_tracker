@@ -4,6 +4,7 @@ This module provides a persistent cache to avoid repeated API calls when
 resolving license information for the same package versions.
 """
 
+import contextlib
 import json
 import sqlite3
 from dataclasses import asdict
@@ -46,37 +47,64 @@ class LicenseCache:
 
         self.db_path = db_path
         self.ttl_days = ttl_days
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_database()
+
+    def __enter__(self) -> "LicenseCache":
+        """Enter context manager, keeping connection open."""
+        self._conn = sqlite3.connect(self.db_path)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit context manager, closing connection."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    @contextlib.contextmanager
+    def _connect(self):
+        """Get a database connection.
+
+        If used as a context manager (with statement), reuses the existing
+        connection. Otherwise, creates a new one and closes it after use.
+        """
+        if self._conn:
+            yield self._conn
+        else:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                yield conn
+            finally:
+                conn.close()
 
     def _init_database(self) -> None:
         """Initialize the database schema if it doesn't exist."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self._connect() as conn:
+            cursor = conn.cursor()
 
-        # Create the main cache table
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS license_cache (
-                package_name TEXT NOT NULL,
-                package_version TEXT NOT NULL,
-                license_data TEXT NOT NULL,
-                resolved_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                PRIMARY KEY (package_name, package_version)
+            # Create the main cache table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS license_cache (
+                    package_name TEXT NOT NULL,
+                    package_version TEXT NOT NULL,
+                    license_data TEXT NOT NULL,
+                    resolved_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    PRIMARY KEY (package_name, package_version)
+                )
+                """
             )
-            """
-        )
 
-        # Create index on expires_at for efficient TTL queries
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_expires
-            ON license_cache(expires_at)
-            """
-        )
+            # Create index on expires_at for efficient TTL queries
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_expires
+                ON license_cache(expires_at)
+                """
+            )
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
     def get(self, name: str, version: str) -> Optional[list[LicenseLink]]:
         """Retrieve cached license data for a package.
@@ -89,20 +117,18 @@ class LicenseCache:
             List of LicenseLink objects if cache hit and not expired,
             None if cache miss or expired.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT license_data, expires_at
-            FROM license_cache
-            WHERE package_name = ? AND package_version = ?
-            """,
-            (name, version),
-        )
-
-        row = cursor.fetchone()
-        conn.close()
+        row = None
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT license_data, expires_at
+                FROM license_cache
+                WHERE package_name = ? AND package_version = ?
+                """,
+                (name, version),
+            )
+            row = cursor.fetchone()
 
         if row is None:
             return None
@@ -143,27 +169,25 @@ class LicenseCache:
         license_dicts = [asdict(lic) for lic in licenses]
         license_data_json = json.dumps(license_dicts)
 
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self._connect() as conn:
+            cursor = conn.cursor()
 
-        # Use REPLACE to handle both insert and update
-        cursor.execute(
-            """
-            REPLACE INTO license_cache
-            (package_name, package_version, license_data, resolved_at, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                name,
-                version,
-                license_data_json,
-                resolved_at.isoformat(),
-                expires_at.isoformat(),
-            ),
-        )
-
-        conn.commit()
-        conn.close()
+            # Use REPLACE to handle both insert and update
+            cursor.execute(
+                """
+                REPLACE INTO license_cache
+                (package_name, package_version, license_data, resolved_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    name,
+                    version,
+                    license_data_json,
+                    resolved_at.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            conn.commit()
 
     def clear(
         self,
@@ -178,30 +202,28 @@ class LicenseCache:
             version: If specified (with package), clear only this
                 specific version. Ignored if package is None.
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        with self._connect() as conn:
+            cursor = conn.cursor()
 
-        if package is None:
-            # Clear all entries
-            cursor.execute("DELETE FROM license_cache")
-        elif version is None:
-            # Clear all versions of a specific package
-            cursor.execute(
-                "DELETE FROM license_cache WHERE package_name = ?",
-                (package,),
-            )
-        else:
-            # Clear specific package version
-            cursor.execute(
-                """
-                DELETE FROM license_cache
-                WHERE package_name = ? AND package_version = ?
-                """,
-                (package, version),
-            )
-
-        conn.commit()
-        conn.close()
+            if package is None:
+                # Clear all entries
+                cursor.execute("DELETE FROM license_cache")
+            elif version is None:
+                # Clear all versions of a specific package
+                cursor.execute(
+                    "DELETE FROM license_cache WHERE package_name = ?",
+                    (package,),
+                )
+            else:
+                # Clear specific package version
+                cursor.execute(
+                    """
+                    DELETE FROM license_cache
+                    WHERE package_name = ? AND package_version = ?
+                    """,
+                    (package, version),
+                )
+            conn.commit()
 
     def info(self) -> dict:
         """Get cache statistics.
@@ -212,13 +234,10 @@ class LicenseCache:
                 - count: Number of cached entries
                 - size_bytes: Database file size in bytes
         """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT COUNT(*) FROM license_cache")
-        count = cursor.fetchone()[0]
-
-        conn.close()
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM license_cache")
+            count = cursor.fetchone()[0]
 
         # Get database file size
         size_bytes = self.db_path.stat().st_size if self.db_path.exists() else 0
