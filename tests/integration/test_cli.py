@@ -84,6 +84,8 @@ def test_check_command_with_allowed_license(tmp_path, mock_scan_and_resolve):
 def mock_license_cache(mocker):
     """Mock the LicenseCache class."""
     mock_cache_instance = mocker.MagicMock()
+    # Ensure the context manager returns the mock instance itself
+    mock_cache_instance.__enter__.return_value = mock_cache_instance
     mock_cache_instance.info.return_value = {
         "path": "/fake/path",
         "count": 10,
