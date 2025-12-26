@@ -5,7 +5,6 @@ attribution documentation and checking compliance.
 """
 
 import asyncio
-import contextlib
 import logging
 from pathlib import Path
 from typing import Annotated, Optional
@@ -77,19 +76,20 @@ async def _scan_and_resolve(
         return packages, {}
 
     # Check cache first
-    cache_manager = LicenseCache() if use_cache else None
+    cached_count = 0
+    to_resolve = []
+    cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
 
-    # Use context manager if cache is enabled, otherwise use a dummy context
-    if cache_manager:
-        cm = cache_manager
+    # Context manager for cache handles persistent connection
+    cache_ctx = LicenseCache() if use_cache else None
+
+    # If using cache, enter the context manager
+    if cache_ctx:
+        cache = cache_ctx.__enter__()
     else:
-        cm = contextlib.nullcontext()
+        cache = None
 
-    with cm as cache:
-        cached_count = 0
-        to_resolve = []
-        cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
-
+    try:
         for spec in packages:
             if cache:
                 cached = cache.get(spec.name, spec.version)
@@ -117,6 +117,9 @@ async def _scan_and_resolve(
                 # Cache the result
                 if cache and metadata and metadata.licenses:
                     cache.set(spec.name, spec.version, metadata.licenses)
+    finally:
+        if cache_ctx:
+            cache_ctx.__exit__(None, None, None)
 
     # Combine results
     all_metadata = {**cached_metadata, **resolved_metadata}
@@ -427,26 +430,25 @@ def cache(
         show  - Display cache location, entry count, and size
         clear - Clear all cached entries (or specific package)
     """
-    cache_instance = LicenseCache()
+    with LicenseCache() as cache_instance:
+        if action == "show":
+            info = cache_instance.info()
+            console.print(f"[bold]Cache Location:[/bold] {info['path']}")
+            console.print(f"[bold]Entries:[/bold] {info['count']}")
+            console.print(f"[bold]Size:[/bold] {info['size_bytes'] / 1024:.1f} KB")
 
-    if action == "show":
-        info = cache_instance.info()
-        console.print(f"[bold]Cache Location:[/bold] {info['path']}")
-        console.print(f"[bold]Entries:[/bold] {info['count']}")
-        console.print(f"[bold]Size:[/bold] {info['size_bytes'] / 1024:.1f} KB")
+        elif action == "clear":
+            if package:
+                cache_instance.clear(package=package)
+                console.print(f"[green]Cleared cache for:[/green] {package}")
+            else:
+                cache_instance.clear()
+                console.print("[green]Cache cleared[/green]")
 
-    elif action == "clear":
-        if package:
-            cache_instance.clear(package=package)
-            console.print(f"[green]Cleared cache for:[/green] {package}")
         else:
-            cache_instance.clear()
-            console.print("[green]Cache cleared[/green]")
-
-    else:
-        err_console.print(f"[red]Unknown action:[/red] {action}")
-        err_console.print("Valid actions: show, clear")
-        raise typer.Exit(code=2)
+            err_console.print(f"[red]Unknown action:[/red] {action}")
+            err_console.print("Valid actions: show, clear")
+            raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":
