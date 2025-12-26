@@ -4,7 +4,6 @@ This module provides a persistent cache to avoid repeated API calls when
 resolving license information for the same package versions.
 """
 
-import contextlib
 import json
 import sqlite3
 from dataclasses import asdict
@@ -51,35 +50,31 @@ class LicenseCache:
         self._init_database()
 
     def __enter__(self) -> "LicenseCache":
-        """Enter context manager, keeping connection open."""
+        """Enter the runtime context related to this object."""
         self._conn = sqlite3.connect(self.db_path)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager, closing connection."""
+        """Exit the runtime context related to this object."""
         if self._conn:
             self._conn.close()
             self._conn = None
 
-    @contextlib.contextmanager
-    def _connect(self):
+    def _get_conn(self) -> tuple[sqlite3.Connection, bool]:
         """Get a database connection.
 
-        If used as a context manager (with statement), reuses the existing
-        connection. Otherwise, creates a new one and closes it after use.
+        Returns:
+            Tuple containing (connection, should_close_flag).
+            If should_close_flag is True, the caller is responsible for closing the connection.
         """
         if self._conn:
-            yield self._conn
-        else:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                yield conn
-            finally:
-                conn.close()
+            return self._conn, False
+        return sqlite3.connect(self.db_path), True
 
     def _init_database(self) -> None:
         """Initialize the database schema if it doesn't exist."""
-        with self._connect() as conn:
+        conn, should_close = self._get_conn()
+        try:
             cursor = conn.cursor()
 
             # Create the main cache table
@@ -105,6 +100,9 @@ class LicenseCache:
             )
 
             conn.commit()
+        finally:
+            if should_close:
+                conn.close()
 
     def get(self, name: str, version: str) -> Optional[list[LicenseLink]]:
         """Retrieve cached license data for a package.
@@ -117,9 +115,10 @@ class LicenseCache:
             List of LicenseLink objects if cache hit and not expired,
             None if cache miss or expired.
         """
-        row = None
-        with self._connect() as conn:
+        conn, should_close = self._get_conn()
+        try:
             cursor = conn.cursor()
+
             cursor.execute(
                 """
                 SELECT license_data, expires_at
@@ -128,7 +127,11 @@ class LicenseCache:
                 """,
                 (name, version),
             )
+
             row = cursor.fetchone()
+        finally:
+            if should_close:
+                conn.close()
 
         if row is None:
             return None
@@ -169,7 +172,8 @@ class LicenseCache:
         license_dicts = [asdict(lic) for lic in licenses]
         license_data_json = json.dumps(license_dicts)
 
-        with self._connect() as conn:
+        conn, should_close = self._get_conn()
+        try:
             cursor = conn.cursor()
 
             # Use REPLACE to handle both insert and update
@@ -187,7 +191,11 @@ class LicenseCache:
                     expires_at.isoformat(),
                 ),
             )
+
             conn.commit()
+        finally:
+            if should_close:
+                conn.close()
 
     def clear(
         self,
@@ -202,7 +210,8 @@ class LicenseCache:
             version: If specified (with package), clear only this
                 specific version. Ignored if package is None.
         """
-        with self._connect() as conn:
+        conn, should_close = self._get_conn()
+        try:
             cursor = conn.cursor()
 
             if package is None:
@@ -223,7 +232,11 @@ class LicenseCache:
                     """,
                     (package, version),
                 )
+
             conn.commit()
+        finally:
+            if should_close:
+                conn.close()
 
     def info(self) -> dict:
         """Get cache statistics.
@@ -234,10 +247,15 @@ class LicenseCache:
                 - count: Number of cached entries
                 - size_bytes: Database file size in bytes
         """
-        with self._connect() as conn:
+        conn, should_close = self._get_conn()
+        try:
             cursor = conn.cursor()
+
             cursor.execute("SELECT COUNT(*) FROM license_cache")
             count = cursor.fetchone()[0]
+        finally:
+            if should_close:
+                conn.close()
 
         # Get database file size
         size_bytes = self.db_path.stat().st_size if self.db_path.exists() else 0
