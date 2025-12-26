@@ -90,17 +90,21 @@ async def _scan_and_resolve(
         to_resolve = []
         cached_metadata: dict[PackageSpec, Optional[PackageMetadata]] = {}
 
+        # Batch get
+        cached_results = {}
+        if cache:
+            spec_tuples = [(spec.name, spec.version) for spec in packages]
+            cached_results = cache.get_batch(spec_tuples)
+
         for spec in packages:
-            if cache:
-                cached = cache.get(spec.name, spec.version)
-                if cached:
-                    cached_count += 1
-                    cached_metadata[spec] = PackageMetadata(
-                        name=spec.name,
-                        version=spec.version,
-                        licenses=cached,
-                    )
-                    continue
+            if (spec.name, spec.version) in cached_results:
+                cached_count += 1
+                cached_metadata[spec] = PackageMetadata(
+                    name=spec.name,
+                    version=spec.version,
+                    licenses=cached_results[(spec.name, spec.version)],
+                )
+                continue
             to_resolve.append(spec)
 
         if cached_count > 0 and verbose:
@@ -112,11 +116,15 @@ async def _scan_and_resolve(
             async with WaterfallResolver(github_token=github_token) as resolver:
                 results = await resolver.resolve_batch(to_resolve)
 
+            # Batch set
+            items_to_cache = {}
             for spec, metadata in results.items():
                 resolved_metadata[spec] = metadata
-                # Cache the result
                 if cache and metadata and metadata.licenses:
-                    cache.set(spec.name, spec.version, metadata.licenses)
+                    items_to_cache[(spec.name, spec.version)] = metadata.licenses
+
+            if cache and items_to_cache:
+                cache.set_batch(items_to_cache)
 
     # Combine results
     all_metadata = {**cached_metadata, **resolved_metadata}
