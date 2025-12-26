@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -318,6 +319,64 @@ class TestCacheInitialization:
         assert result is not None
 
         conn.close()
+
+
+class TestCacheBatchOperations:
+    """Test batch cache operations."""
+
+    def test_get_batch(self, cache, sample_licenses):
+        """Test retrieving multiple cache entries."""
+        # Store entries individually
+        cache.set("pkg1", "1.0", sample_licenses)
+        cache.set("pkg2", "1.0", sample_licenses)
+
+        # Retrieve batch
+        specs = [("pkg1", "1.0"), ("pkg2", "1.0"), ("pkg3", "1.0")]
+        results = cache.get_batch(specs)
+
+        assert len(results) == 2
+        assert ("pkg1", "1.0") in results
+        assert ("pkg2", "1.0") in results
+        assert ("pkg3", "1.0") not in results
+        assert len(results[("pkg1", "1.0")]) == 2
+
+    def test_set_batch(self, cache, sample_licenses):
+        """Test storing multiple cache entries."""
+        items = {
+            ("pkg1", "1.0"): sample_licenses,
+            ("pkg2", "1.0"): sample_licenses,
+        }
+        cache.set_batch(items)
+
+        # Verify individually
+        assert cache.get("pkg1", "1.0") is not None
+        assert cache.get("pkg2", "1.0") is not None
+
+    def test_batch_expiration(self, cache, sample_licenses):
+        """Test that expired entries are excluded from batch results."""
+        # Store expired entry
+        import sqlite3
+        conn = sqlite3.connect(cache.db_path)
+        cursor = conn.cursor()
+
+        old_resolved = (datetime.now(UTC) - timedelta(days=60)).isoformat()
+        old_expired = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        data_json = json.dumps([asdict(l) for l in sample_licenses])
+
+        cursor.execute(
+            "INSERT INTO license_cache VALUES (?, ?, ?, ?, ?)",
+            ("expired_pkg", "1.0", data_json, old_resolved, old_expired)
+        )
+        conn.commit()
+        conn.close()
+
+        # Store fresh entry
+        cache.set("fresh_pkg", "1.0", sample_licenses)
+
+        results = cache.get_batch([("expired_pkg", "1.0"), ("fresh_pkg", "1.0")])
+
+        assert ("fresh_pkg", "1.0") in results
+        assert ("expired_pkg", "1.0") not in results
 
 
 class TestCacheEdgeCases:

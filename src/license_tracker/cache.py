@@ -149,6 +149,66 @@ class LicenseCache:
             # If data is corrupted, treat as cache miss
             return None
 
+    def get_batch(
+        self, specs: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], list[LicenseLink]]:
+        """Retrieve cached license data for multiple packages.
+
+        Args:
+            specs: List of (name, version) tuples.
+
+        Returns:
+            Dictionary mapping (name, version) -> list of LicenseLink objects.
+            Only hits are included in the result.
+        """
+        results = {}
+        # Use set to avoid duplicate lookups
+        specs_set = set(specs)
+        names = list({name for name, _ in specs_set})
+
+        if not names:
+            return {}
+
+        # Chunk to avoid SQLite limits
+        chunk_size = 900
+        for i in range(0, len(names), chunk_size):
+            chunk_names = names[i : i + chunk_size]
+            placeholders = ",".join(["?"] * len(chunk_names))
+
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT package_name, package_version, license_data, expires_at
+                    FROM license_cache
+                    WHERE package_name IN ({placeholders})
+                    """,
+                    chunk_names,
+                )
+                rows = cursor.fetchall()
+
+                for row in rows:
+                    p_name, p_version, license_data, expires_at_str = row
+
+                    if (p_name, p_version) not in specs_set:
+                        continue
+
+                    # Check expiration
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if datetime.now(UTC) >= expires_at:
+                        continue
+
+                    try:
+                        license_dicts = json.loads(license_data)
+                        licenses = [
+                            LicenseLink(**lic_dict) for lic_dict in license_dicts
+                        ]
+                        results[(p_name, p_version)] = licenses
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        continue
+
+        return results
+
     def set(
         self,
         name: str,
@@ -186,6 +246,44 @@ class LicenseCache:
                     resolved_at.isoformat(),
                     expires_at.isoformat(),
                 ),
+            )
+            conn.commit()
+
+    def set_batch(
+        self,
+        items: dict[tuple[str, str], list[LicenseLink]],
+    ) -> None:
+        """Store license data for multiple packages in the cache.
+
+        Args:
+            items: Dictionary mapping (name, version) -> list of LicenseLink objects.
+        """
+        if not items:
+            return
+
+        resolved_at = datetime.now(UTC)
+        expires_at = resolved_at + timedelta(days=self.ttl_days)
+        resolved_at_str = resolved_at.isoformat()
+        expires_at_str = expires_at.isoformat()
+
+        data_to_insert = []
+        for (name, version), licenses in items.items():
+            license_dicts = [asdict(lic) for lic in licenses]
+            license_data_json = json.dumps(license_dicts)
+            data_to_insert.append(
+                (name, version, license_data_json, resolved_at_str, expires_at_str)
+            )
+
+        with self._connect() as conn:
+            cursor = conn.cursor()
+
+            cursor.executemany(
+                """
+                REPLACE INTO license_cache
+                (package_name, package_version, license_data, resolved_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                data_to_insert,
             )
             conn.commit()
 
