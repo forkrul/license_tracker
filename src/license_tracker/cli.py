@@ -90,18 +90,20 @@ async def _scan_and_resolve(
         cache = None
 
     try:
-        for spec in packages:
-            if cache:
-                cached = cache.get(spec.name, spec.version)
-                if cached:
+        if cache:
+            cached_results = cache.get_batch(packages)
+            for spec, cached_licenses in cached_results.items():
+                if cached_licenses:
                     cached_count += 1
                     cached_metadata[spec] = PackageMetadata(
                         name=spec.name,
                         version=spec.version,
-                        licenses=cached,
+                        licenses=cached_licenses,
                     )
-                    continue
-            to_resolve.append(spec)
+                else:
+                    to_resolve.append(spec)
+        else:
+            to_resolve = packages
 
         if cached_count > 0 and verbose:
             console.print(f"[dim]Using {cached_count} cached entries[/dim]")
@@ -112,11 +114,18 @@ async def _scan_and_resolve(
             async with WaterfallResolver(github_token=github_token) as resolver:
                 results = await resolver.resolve_batch(to_resolve)
 
+            # Collect new results for batch caching
+            to_cache: dict[PackageSpec, list[LicenseLink]] = {}
+
             for spec, metadata in results.items():
                 resolved_metadata[spec] = metadata
-                # Cache the result
-                if cache and metadata and metadata.licenses:
-                    cache.set(spec.name, spec.version, metadata.licenses)
+                # Prepare for batch caching
+                if metadata and metadata.licenses:
+                    to_cache[spec] = metadata.licenses
+
+            # Batch update cache
+            if cache and to_cache:
+                cache.set_batch(to_cache)
     finally:
         if cache_ctx:
             cache_ctx.__exit__(None, None, None)
