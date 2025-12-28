@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from license_tracker.models import LicenseLink
+from license_tracker.models import LicenseLink, PackageSpec
 
 
 class LicenseCache:
@@ -152,6 +152,80 @@ class LicenseCache:
             # If data is corrupted, treat as cache miss
             return None
 
+    def get_batch(
+        self, packages: list[PackageSpec]
+    ) -> dict[PackageSpec, Optional[list[LicenseLink]]]:
+        """Retrieve cached license data for multiple packages.
+
+        Args:
+            packages: List of PackageSpec objects to look up.
+
+        Returns:
+            Dictionary mapping PackageSpec to list of LicenseLink objects (or None).
+        """
+        results: dict[PackageSpec, Optional[list[LicenseLink]]] = {
+            pkg: None for pkg in packages
+        }
+        if not packages:
+            return results
+
+        conn, should_close = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            # SQLite limits variables (default 999 or 32766).
+            # We use 2 variables per item (name, version).
+            # Chunk size of 400 is safe (800 vars).
+            chunk_size = 400
+            for i in range(0, len(packages), chunk_size):
+                chunk = packages[i : i + chunk_size]
+
+                # Build query with proper placeholders
+                # (package_name, package_version) IN ((?,?), (?,?), ...)
+                placeholders = ",".join(["(?, ?)"] * len(chunk))
+                query = f"""
+                SELECT package_name, package_version, license_data, expires_at
+                FROM license_cache
+                WHERE (package_name, package_version) IN ({placeholders})
+                """
+
+                params = []
+                for pkg in chunk:
+                    params.extend((pkg.name, pkg.version))
+
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+
+                # Process results
+                now = datetime.now(UTC)
+                for row in rows:
+                    p_name, p_ver, license_data_json, expires_at_str = row
+
+                    # Check expiry
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if now >= expires_at:
+                        continue
+
+                    try:
+                        license_dicts = json.loads(license_data_json)
+                        licenses = [
+                            LicenseLink(**lic_dict) for lic_dict in license_dicts
+                        ]
+
+                        # Map back to PackageSpec objects
+                        # Since specs might be duplicated or we need to find which spec matches
+                        for pkg in chunk:
+                            if pkg.name == p_name and pkg.version == p_ver:
+                                results[pkg] = licenses
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        continue
+
+        finally:
+            if should_close:
+                conn.close()
+
+        return results
+
     def set(
         self,
         name: str,
@@ -190,6 +264,55 @@ class LicenseCache:
                     resolved_at.isoformat(),
                     expires_at.isoformat(),
                 ),
+            )
+
+            conn.commit()
+        finally:
+            if should_close:
+                conn.close()
+
+    def set_batch(
+        self,
+        items: dict[PackageSpec, list[LicenseLink]],
+    ) -> None:
+        """Store license data for multiple packages in the cache.
+
+        Args:
+            items: Dictionary mapping PackageSpec to list of LicenseLink objects.
+        """
+        if not items:
+            return
+
+        resolved_at = datetime.now(UTC)
+        expires_at = resolved_at + timedelta(days=self.ttl_days)
+        resolved_at_iso = resolved_at.isoformat()
+        expires_at_iso = expires_at.isoformat()
+
+        data_to_insert = []
+        for spec, licenses in items.items():
+            license_dicts = [asdict(lic) for lic in licenses]
+            license_data_json = json.dumps(license_dicts)
+            data_to_insert.append(
+                (
+                    spec.name,
+                    spec.version,
+                    license_data_json,
+                    resolved_at_iso,
+                    expires_at_iso,
+                )
+            )
+
+        conn, should_close = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            cursor.executemany(
+                """
+                REPLACE INTO license_cache
+                (package_name, package_version, license_data, resolved_at, expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                data_to_insert,
             )
 
             conn.commit()
