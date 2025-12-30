@@ -180,6 +180,15 @@ class LicenseCache:
             for i in range(0, len(packages), chunk_size):
                 chunk = packages[i : i + chunk_size]
 
+                # Optimize: Pre-map (name, version) to specs for O(1) lookup
+                # This avoids O(N*M) complexity in the result processing loop
+                pkg_map: dict[tuple[str, str], list[PackageSpec]] = {}
+                for pkg in chunk:
+                    key = (pkg.name, pkg.version)
+                    if key not in pkg_map:
+                        pkg_map[key] = []
+                    pkg_map[key].append(pkg)
+
                 # Build query with proper placeholders
                 # (package_name, package_version) IN ((?,?), (?,?), ...)
                 placeholders = ",".join(["(?, ?)"] * len(chunk))
@@ -212,10 +221,11 @@ class LicenseCache:
                             LicenseLink(**lic_dict) for lic_dict in license_dicts
                         ]
 
-                        # Map back to PackageSpec objects
-                        # Since specs might be duplicated or we need to find which spec matches
-                        for pkg in chunk:
-                            if pkg.name == p_name and pkg.version == p_ver:
+                        # Optimize: Use hash map for O(1) assignment
+                        # Reduces complexity from O(chunk_size^2) to O(chunk_size)
+                        key = (p_name, p_ver)
+                        if key in pkg_map:
+                            for pkg in pkg_map[key]:
                                 results[pkg] = licenses
                     except (json.JSONDecodeError, TypeError, KeyError):
                         continue
