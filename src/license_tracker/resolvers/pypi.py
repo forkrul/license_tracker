@@ -1,6 +1,6 @@
 """PyPI resolver for fetching license metadata from the PyPI JSON API.
 
-This resolver fetches package metadata from PyPI's JSON API and extracts
+This resolver fetches package metadata from the PyPI JSON API and extracts
 license information from the package metadata, falling back to classifiers
 when necessary.
 """
@@ -18,6 +18,31 @@ logger = logging.getLogger(__name__)
 
 # Initialize SPDX licensing library for normalization
 SPDX = get_spdx_licensing()
+
+# Common license aliases and variations map
+LICENSE_MAP = {
+    "Apache 2.0": "Apache-2.0",
+    "Apache License 2.0": "Apache-2.0",
+    "Apache Software License": "Apache-2.0",
+    "Apache License, Version 2.0": "Apache-2.0",
+    "MIT License": "MIT",
+    "BSD License": "BSD-3-Clause",
+    "BSD 3-Clause License": "BSD-3-Clause",
+    "BSD 2-Clause License": "BSD-2-Clause",
+    "GNU General Public License v3": "GPL-3.0",
+    "GNU General Public License v3 (GPLv3)": "GPL-3.0",
+    "GNU General Public License v2": "GPL-2.0",
+    "GNU Lesser General Public License v3": "LGPL-3.0",
+    "Mozilla Public License 2.0": "MPL-2.0",
+    "ISC License": "ISC",
+    "Python Software Foundation License": "PSF-2.0",
+}
+
+# Common SPDX IDs for case-insensitive matching
+COMMON_SPDX = [
+    "MIT", "Apache-2.0", "GPL-3.0", "GPL-2.0", "LGPL-3.0",
+    "BSD-3-Clause", "BSD-2-Clause", "ISC", "MPL-2.0", "PSF-2.0",
+]
 
 
 class PyPIResolver(BaseResolver):
@@ -314,28 +339,10 @@ class PyPIResolver(BaseResolver):
             # Clean up the license text
             license_text = license_text.strip()
 
-            # Handle common aliases and variations
-            license_map = {
-                "Apache 2.0": "Apache-2.0",
-                "Apache License 2.0": "Apache-2.0",
-                "Apache Software License": "Apache-2.0",
-                "Apache License, Version 2.0": "Apache-2.0",
-                "MIT License": "MIT",
-                "BSD License": "BSD-3-Clause",
-                "BSD 3-Clause License": "BSD-3-Clause",
-                "BSD 2-Clause License": "BSD-2-Clause",
-                "GNU General Public License v3": "GPL-3.0",
-                "GNU General Public License v3 (GPLv3)": "GPL-3.0",
-                "GNU General Public License v2": "GPL-2.0",
-                "GNU Lesser General Public License v3": "LGPL-3.0",
-                "Mozilla Public License 2.0": "MPL-2.0",
-                "ISC License": "ISC",
-                "Python Software Foundation License": "PSF-2.0",
-            }
-
             # Check if we have a direct mapping
-            if license_text in license_map:
-                spdx_id = license_map[license_text]
+            # Optimized: using module-level constant LICENSE_MAP
+            if license_text in LICENSE_MAP:
+                spdx_id = LICENSE_MAP[license_text]
                 return LicenseLink(
                     spdx_id=spdx_id,
                     name=license_text,
@@ -361,13 +368,9 @@ class PyPIResolver(BaseResolver):
                 pass
 
             # Try case-insensitive matching of common SPDX IDs
-            common_spdx = [
-                "MIT", "Apache-2.0", "GPL-3.0", "GPL-2.0", "LGPL-3.0",
-                "BSD-3-Clause", "BSD-2-Clause", "ISC", "MPL-2.0", "PSF-2.0",
-            ]
-
+            # Optimized: using module-level constant COMMON_SPDX
             license_upper = license_text.upper()
-            for spdx_id in common_spdx:
+            for spdx_id in COMMON_SPDX:
                 if spdx_id.upper() in license_upper or spdx_id.upper().replace("-", "") in license_upper.replace("-", "").replace(" ", ""):
                     return LicenseLink(
                         spdx_id=spdx_id,
