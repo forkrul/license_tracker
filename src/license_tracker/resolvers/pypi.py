@@ -6,6 +6,7 @@ when necessary.
 """
 
 import logging
+from functools import lru_cache
 from typing import Optional
 
 import aiohttp
@@ -43,6 +44,74 @@ COMMON_SPDX = [
     "MIT", "Apache-2.0", "GPL-3.0", "GPL-2.0", "LGPL-3.0",
     "BSD-3-Clause", "BSD-2-Clause", "ISC", "MPL-2.0", "PSF-2.0",
 ]
+
+
+@lru_cache(maxsize=1024)
+def _normalize_license_text(license_text: str) -> Optional[LicenseLink]:
+    """Normalize a license string to SPDX identifier (cached helper).
+
+    Uses the license-expression library to parse and normalize
+    license strings to SPDX identifiers.
+
+    Args:
+        license_text: Raw license string from PyPI.
+
+    Returns:
+        LicenseLink with SPDX identifier and URL, or None if not recognized.
+    """
+    if not license_text or license_text.upper() == "UNKNOWN":
+        return None
+
+    try:
+        # Clean up the license text
+        license_text = license_text.strip()
+
+        # Check if we have a direct mapping
+        # Optimized: using module-level constant LICENSE_MAP
+        if license_text in LICENSE_MAP:
+            spdx_id = LICENSE_MAP[license_text]
+            return LicenseLink(
+                spdx_id=spdx_id,
+                name=license_text,
+                url=f"https://spdx.org/licenses/{spdx_id}.html",
+                is_verified_file=False,
+            )
+
+        # Try to parse with license-expression library
+        try:
+            parsed = SPDX.parse(license_text, validate=True)
+            if parsed:
+                # Get the first license from the expression
+                # For simple cases this will be the license itself
+                spdx_id = str(parsed).strip()
+                return LicenseLink(
+                    spdx_id=spdx_id,
+                    name=license_text,
+                    url=f"https://spdx.org/licenses/{spdx_id}.html",
+                    is_verified_file=False,
+                )
+        except Exception:
+            # If parsing fails, try simple text matching
+            pass
+
+        # Try case-insensitive matching of common SPDX IDs
+        # Optimized: using module-level constant COMMON_SPDX
+        license_upper = license_text.upper()
+        for spdx_id in COMMON_SPDX:
+            if spdx_id.upper() in license_upper or spdx_id.upper().replace("-", "") in license_upper.replace("-", "").replace(" ", ""):
+                return LicenseLink(
+                    spdx_id=spdx_id,
+                    name=license_text,
+                    url=f"https://spdx.org/licenses/{spdx_id}.html",
+                    is_verified_file=False,
+                )
+
+        logger.debug("Could not normalize license: %s", license_text)
+        return None
+
+    except Exception as e:
+        logger.debug("Error normalizing license '%s': %s", license_text, e)
+        return None
 
 
 class PyPIResolver(BaseResolver):
@@ -323,8 +392,7 @@ class PyPIResolver(BaseResolver):
     def _normalize_license(self, license_text: str) -> Optional[LicenseLink]:
         """Normalize a license string to SPDX identifier.
 
-        Uses the license-expression library to parse and normalize
-        license strings to SPDX identifiers.
+        Delegates to cached helper _normalize_license_text.
 
         Args:
             license_text: Raw license string from PyPI.
@@ -332,56 +400,4 @@ class PyPIResolver(BaseResolver):
         Returns:
             LicenseLink with SPDX identifier and URL, or None if not recognized.
         """
-        if not license_text or license_text.upper() == "UNKNOWN":
-            return None
-
-        try:
-            # Clean up the license text
-            license_text = license_text.strip()
-
-            # Check if we have a direct mapping
-            # Optimized: using module-level constant LICENSE_MAP
-            if license_text in LICENSE_MAP:
-                spdx_id = LICENSE_MAP[license_text]
-                return LicenseLink(
-                    spdx_id=spdx_id,
-                    name=license_text,
-                    url=f"https://spdx.org/licenses/{spdx_id}.html",
-                    is_verified_file=False,
-                )
-
-            # Try to parse with license-expression library
-            try:
-                parsed = SPDX.parse(license_text, validate=True)
-                if parsed:
-                    # Get the first license from the expression
-                    # For simple cases this will be the license itself
-                    spdx_id = str(parsed).strip()
-                    return LicenseLink(
-                        spdx_id=spdx_id,
-                        name=license_text,
-                        url=f"https://spdx.org/licenses/{spdx_id}.html",
-                        is_verified_file=False,
-                    )
-            except Exception:
-                # If parsing fails, try simple text matching
-                pass
-
-            # Try case-insensitive matching of common SPDX IDs
-            # Optimized: using module-level constant COMMON_SPDX
-            license_upper = license_text.upper()
-            for spdx_id in COMMON_SPDX:
-                if spdx_id.upper() in license_upper or spdx_id.upper().replace("-", "") in license_upper.replace("-", "").replace(" ", ""):
-                    return LicenseLink(
-                        spdx_id=spdx_id,
-                        name=license_text,
-                        url=f"https://spdx.org/licenses/{spdx_id}.html",
-                        is_verified_file=False,
-                    )
-
-            logger.debug("Could not normalize license: %s", license_text)
-            return None
-
-        except Exception as e:
-            logger.debug("Error normalizing license '%s': %s", license_text, e)
-            return None
+        return _normalize_license_text(license_text)
