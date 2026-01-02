@@ -173,6 +173,10 @@ class LicenseCache:
         try:
             cursor = conn.cursor()
 
+            # Local cache for deserialized license data to avoid redundant json.loads
+            # and object creation for identical license sets (e.g., many packages with MIT)
+            json_cache: dict[str, list[LicenseLink]] = {}
+
             # SQLite limits variables (default 999 or 32766).
             # We use 2 variables per item (name, version).
             # Chunk size of 400 is safe (800 vars).
@@ -216,20 +220,28 @@ class LicenseCache:
                     if now >= expires_at:
                         continue
 
-                    try:
-                        license_dicts = json.loads(license_data_json)
-                        licenses = [
-                            LicenseLink(**lic_dict) for lic_dict in license_dicts
-                        ]
+                    if license_data_json in json_cache:
+                        # Use cached object list if available
+                        licenses = json_cache[license_data_json]
+                        # Create a shallow copy of the list to prevent side effects
+                        # if the consumer modifies the list, but keep shared LicenseLink objects
+                        licenses = list(licenses)
+                    else:
+                        try:
+                            license_dicts = json.loads(license_data_json)
+                            licenses = [
+                                LicenseLink(**lic_dict) for lic_dict in license_dicts
+                            ]
+                            # Cache the result
+                            json_cache[license_data_json] = licenses
+                        except (json.JSONDecodeError, TypeError, KeyError):
+                            continue
 
-                        # Map back to PackageSpec objects using O(1) lookup
-                        key = (p_name, p_ver)
-                        if key in chunk_map:
-                            for pkg in chunk_map[key]:
-                                results[pkg] = licenses
-
-                    except (json.JSONDecodeError, TypeError, KeyError):
-                        continue
+                    # Map back to PackageSpec objects using O(1) lookup
+                    key = (p_name, p_ver)
+                    if key in chunk_map:
+                        for pkg in chunk_map[key]:
+                            results[pkg] = licenses
 
         finally:
             if should_close:
