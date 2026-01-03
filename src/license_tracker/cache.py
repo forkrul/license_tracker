@@ -173,6 +173,10 @@ class LicenseCache:
         try:
             cursor = conn.cursor()
 
+            # Local cache for JSON deserialization to avoid repeated parsing
+            # of identical license data (common in large dependency trees)
+            json_cache: dict[str, list[LicenseLink]] = {}
+
             # SQLite limits variables (default 999 or 32766).
             # We use 2 variables per item (name, version).
             # Chunk size of 400 is safe (800 vars).
@@ -217,10 +221,16 @@ class LicenseCache:
                         continue
 
                     try:
-                        license_dicts = json.loads(license_data_json)
-                        licenses = [
-                            LicenseLink(**lic_dict) for lic_dict in license_dicts
-                        ]
+                        # Optimized: Cache deserialized licenses for identical JSON strings
+                        if license_data_json in json_cache:
+                            # Return a shallow copy to prevent side effects if the list is modified
+                            licenses = list(json_cache[license_data_json])
+                        else:
+                            license_dicts = json.loads(license_data_json)
+                            licenses = [
+                                LicenseLink(**lic_dict) for lic_dict in license_dicts
+                            ]
+                            json_cache[license_data_json] = licenses
 
                         # Map back to PackageSpec objects using O(1) lookup
                         key = (p_name, p_ver)
