@@ -309,10 +309,24 @@ class LicenseCache:
         resolved_at_iso = resolved_at.isoformat()
         expires_at_iso = expires_at.isoformat()
 
+        # Local cache to avoid repeated serialization of identical license lists
+        # Maps tuple of LicenseLink ids -> serialized JSON
+        serialization_cache: dict[tuple[int, ...], str] = {}
+
         data_to_insert = []
         for spec, licenses in items.items():
-            license_dicts = [asdict(lic) for lic in licenses]
-            license_data_json = json.dumps(license_dicts)
+            # Create a key based on object identities of the licenses
+            # This works efficiently because PyPIResolver caches LicenseLink instances,
+            # so identical licenses share the same object instance.
+            cache_key = tuple(id(lic) for lic in licenses)
+
+            if cache_key in serialization_cache:
+                license_data_json = serialization_cache[cache_key]
+            else:
+                license_dicts = [asdict(lic) for lic in licenses]
+                license_data_json = json.dumps(license_dicts)
+                serialization_cache[cache_key] = license_data_json
+
             data_to_insert.append(
                 (
                     spec.name,
