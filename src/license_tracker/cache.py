@@ -309,10 +309,25 @@ class LicenseCache:
         resolved_at_iso = resolved_at.isoformat()
         expires_at_iso = expires_at.isoformat()
 
+        # Local cache for JSON serialization to avoid repeated processing
+        # of identical license lists (common in large dependency trees)
+        serialization_cache: dict[tuple[int, ...], str] = {}
+
         data_to_insert = []
         for spec, licenses in items.items():
-            license_dicts = [asdict(lic) for lic in licenses]
-            license_data_json = json.dumps(license_dicts)
+            # Optimization: Check if we've already serialized this exact set of license objects
+            # Using ids is safe because:
+            # 1. We are within a single function call scope
+            # 2. Resolvers (like PyPIResolver) use lru_cache for license objects
+            license_ids = tuple(id(lic) for lic in licenses)
+
+            if license_ids in serialization_cache:
+                license_data_json = serialization_cache[license_ids]
+            else:
+                license_dicts = [asdict(lic) for lic in licenses]
+                license_data_json = json.dumps(license_dicts)
+                serialization_cache[license_ids] = license_data_json
+
             data_to_insert.append(
                 (
                     spec.name,

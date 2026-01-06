@@ -9,3 +9,7 @@
 ## 2024-05-24 - [Memoized JSON Deserialization]
 **Learning:** In large dependency trees, many packages share identical license data. Repeatedly calling `json.loads` on the same JSON string is wasteful.
 **Action:** Implemented a local `json_cache` within `LicenseCache.get_batch` to memoize deserialized license lists. This reduced batch retrieval time by ~50% in benchmarks with high duplication.
+
+## 2024-05-24 - [Memoized JSON Serialization]
+**Learning:** Serializing `LicenseLink` objects to JSON repeatedly for packages with identical licenses (e.g., all MIT) wastes CPU cycles.
+**Action:** Implemented a local `serialization_cache` in `LicenseCache.set_batch` using tuple of object IDs as keys (safe due to resolver lru_cache). This avoids redundant `asdict` and `json.dumps` calls for commonly reused license objects.
