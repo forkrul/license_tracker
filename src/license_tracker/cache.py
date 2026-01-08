@@ -6,7 +6,7 @@ resolving license information for the same package versions.
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, astuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -310,9 +310,23 @@ class LicenseCache:
         expires_at_iso = expires_at.isoformat()
 
         data_to_insert = []
+        # Local cache for JSON serialization to avoid repeated dumps
+        # Key is a tuple of license attributes which is hashable
+        serialization_cache: dict[tuple, str] = {}
+
         for spec, licenses in items.items():
-            license_dicts = [asdict(lic) for lic in licenses]
-            license_data_json = json.dumps(license_dicts)
+            # Create a content-based key for caching using all fields
+            # astuple includes all fields in defined order, which is robust enough
+            # for cache key purposes (if field order changes, key changes)
+            cache_key = tuple(astuple(lic) for lic in licenses)
+
+            if cache_key in serialization_cache:
+                license_data_json = serialization_cache[cache_key]
+            else:
+                license_dicts = [asdict(lic) for lic in licenses]
+                license_data_json = json.dumps(license_dicts)
+                serialization_cache[cache_key] = license_data_json
+
             data_to_insert.append(
                 (
                     spec.name,
