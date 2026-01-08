@@ -309,10 +309,23 @@ class LicenseCache:
         resolved_at_iso = resolved_at.isoformat()
         expires_at_iso = expires_at.isoformat()
 
+        serialization_cache: dict[tuple, str] = {}
         data_to_insert = []
         for spec, licenses in items.items():
-            license_dicts = [asdict(lic) for lic in licenses]
-            license_data_json = json.dumps(license_dicts)
+            # Create a hashable key representing the license content
+            # This is significantly faster than repeated asdict() + json.dumps()
+            license_key = tuple(
+                (lic.spdx_id, lic.name, lic.url, lic.is_verified_file)
+                for lic in licenses
+            )
+
+            if license_key in serialization_cache:
+                license_data_json = serialization_cache[license_key]
+            else:
+                license_dicts = [asdict(lic) for lic in licenses]
+                license_data_json = json.dumps(license_dicts)
+                serialization_cache[license_key] = license_data_json
+
             data_to_insert.append(
                 (
                     spec.name,
