@@ -142,7 +142,10 @@ class PyPIResolver(BaseResolver):
             The shared aiohttp ClientSession.
         """
         if self._session is None or self._session.closed:
+            # Optimized: Enable DNS cache to reduce latency for repeated host lookups
+            connector = aiohttp.TCPConnector(ttl_dns_cache=300)
             self._session = aiohttp.ClientSession(
+                connector=connector,
                 timeout=aiohttp.ClientTimeout(total=10)
             )
         return self._session

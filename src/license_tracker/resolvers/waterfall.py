@@ -157,6 +157,10 @@ class WaterfallResolver(WaterfallResolverBase):
         Uses asyncio.gather to resolve packages in parallel, with exception
         handling to ensure partial failures don't stop the entire batch.
 
+        Optimizations:
+        1. Deduplicates specs to avoid redundant API calls.
+        2. Uses a Semaphore to limit concurrency and prevent resource exhaustion.
+
         Args:
             specs: List of package specifications to resolve.
 
@@ -167,15 +171,34 @@ class WaterfallResolver(WaterfallResolverBase):
         """
         logger.info("Starting batch resolution of %d packages", len(specs))
 
-        # Create resolution tasks for all specs
-        tasks = [self.resolve(spec) for spec in specs]
+        # Optimization 1: Deduplicate specs
+        # Since PackageSpec is frozen/hashable, we can use a set to get unique items
+        unique_specs = list(set(specs))
+        if len(unique_specs) < len(specs):
+            logger.info(
+                "Deduplicated %d packages to %d unique packages",
+                len(specs),
+                len(unique_specs),
+            )
+
+        # Optimization 2: Limit concurrency
+        # Limit to 50 concurrent resolution chains to avoid hitting
+        # file descriptor limits or overwhelming the event loop
+        sem = asyncio.Semaphore(50)
+
+        async def bounded_resolve(spec: PackageSpec) -> Optional[PackageMetadata]:
+            async with sem:
+                return await self.resolve(spec)
+
+        # Create resolution tasks for unique specs only
+        tasks = [bounded_resolve(spec) for spec in unique_specs]
 
         # Execute all tasks concurrently with exception handling
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Build result dictionary, handling exceptions
-        result_dict: dict[PackageSpec, Optional[PackageMetadata]] = {}
-        for spec, result in zip(specs, results):
+        # Map results back to unique specs
+        unique_results_map: dict[PackageSpec, Optional[PackageMetadata]] = {}
+        for spec, result in zip(unique_specs, results):
             if isinstance(result, Exception):
                 # Log the exception but don't let it stop other resolutions
                 logger.error(
@@ -184,14 +207,21 @@ class WaterfallResolver(WaterfallResolverBase):
                     spec.version,
                     result,
                 )
-                result_dict[spec] = None
+                unique_results_map[spec] = None
             else:
-                result_dict[spec] = result
+                unique_results_map[spec] = result
+
+        # Build final result dictionary for ALL input specs (expanding duplicates)
+        result_dict: dict[PackageSpec, Optional[PackageMetadata]] = {}
+        for spec in specs:
+            result_dict[spec] = unique_results_map.get(spec)
 
         # Log summary
-        successful = sum(1 for metadata in result_dict.values() if metadata is not None)
+        successful = sum(1 for metadata in unique_results_map.values() if metadata is not None)
         logger.info(
-            "Batch resolution complete: %d/%d successful", successful, len(specs)
+            "Batch resolution complete: %d/%d successful (unique)",
+            successful,
+            len(unique_specs),
         )
 
         return result_dict

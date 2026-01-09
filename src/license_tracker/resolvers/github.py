@@ -60,7 +60,9 @@ class GitHubResolver(BaseResolver):
             Shared aiohttp ClientSession instance.
         """
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            # Optimized: Enable DNS cache to reduce latency for repeated host lookups
+            connector = aiohttp.TCPConnector(ttl_dns_cache=300)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def close(self) -> None:
