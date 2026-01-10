@@ -45,6 +45,23 @@ COMMON_SPDX = [
     "BSD-3-Clause", "BSD-2-Clause", "ISC", "MPL-2.0", "PSF-2.0",
 ]
 
+# Common repository URL keys in order of preference
+# Moved to module level to avoid recreation on every call
+REPO_KEYS = [
+    "Source",
+    "Repository",
+    "Source Code",
+    "source",
+    "repository",
+    "Code",
+    "GitHub",
+    "GitLab",
+]
+
+# Supported git hosting providers
+# Moved to module level to avoid recreation on every call
+GIT_HOSTS = ["github.com", "gitlab.com", "bitbucket.org"]
+
 
 @lru_cache(maxsize=1024)
 def _normalize_license_text(license_text: str) -> Optional[LicenseLink]:
@@ -310,26 +327,14 @@ class PyPIResolver(BaseResolver):
         if not project_urls:
             return None
 
-        # Try common repository URL keys in order of preference
-        repo_keys = [
-            "Source",
-            "Repository",
-            "Source Code",
-            "source",
-            "repository",
-            "Code",
-            "GitHub",
-            "GitLab",
-        ]
-
-        for key in repo_keys:
+        # Use module-level constant for keys preference order
+        for key in REPO_KEYS:
             if key in project_urls:
                 url = project_urls[key]
                 # Basic validation that it's a Git hosting URL
-                if any(
-                    host in url.lower()
-                    for host in ["github.com", "gitlab.com", "bitbucket.org"]
-                ):
+                # Optimization: Hoist url.lower() out of the loop to avoid repeated string allocation
+                url_lower = url.lower()
+                if any(host in url_lower for host in GIT_HOSTS):
                     return url
 
         return None
