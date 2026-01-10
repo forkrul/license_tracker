@@ -9,3 +9,7 @@
 ## 2024-05-24 - [Memoized JSON Deserialization]
 **Learning:** In large dependency trees, many packages share identical license data. Repeatedly calling `json.loads` on the same JSON string is wasteful.
 **Action:** Implemented a local `json_cache` within `LicenseCache.get_batch` to memoize deserialized license lists. This reduced batch retrieval time by ~50% in benchmarks with high duplication.
+
+## 2026-01-10 - [Hoisted String Lowercasing in Loop]
+**Learning:** In `PyPIResolver._extract_repository_url`, calling `url.lower()` inside an `any()` generator expression meant it was executed multiple times (once for each host check) for every URL.
+**Action:** Hoisted `url.lower()` out of the loop and moved the list of allowed hosts to a module-level constant. This reduces string allocation and iteration overhead.
